@@ -1,5 +1,6 @@
 #include "random.h"
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <iostream>
 
@@ -23,7 +24,7 @@ void test_chacha() {
   assert(output == expected_output);
 }
 
-void test_uniform() {
+void test_uniform_int() {
   Random random("foo", 123);
 
   for (const int n : {17, 1900000000}) {
@@ -33,7 +34,7 @@ void test_uniform() {
     const int num_iters = 1000000;
     double total = 0.0;
     for (int i=0; i < num_iters; ++i) {
-      const int a = random.uniform(0, n - 1);
+      const int a = random.uniform_int(0, n - 1);
       assert(a >= 0 && a < n);
       total += a;
     }
@@ -53,7 +54,7 @@ void test_shuffle() {
 
 int main() {
     test_chacha();
-    test_uniform();
+    test_uniform_int();
     test_shuffle();
     std::cout << "OK\n";
 }

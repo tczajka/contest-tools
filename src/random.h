@@ -7,8 +7,8 @@
 
 #include <algorithm>
 #include <array>
-#include <cassert>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 
 namespace random_private {
@@ -33,24 +33,24 @@ public:
     // Random stream is determined by (key, problem_name, test_id).
     //
     // problem_name.size() <= 4
-    explicit Random(const std::string &problem_name,
+    explicit Random(const std::string_view problem_name,
                     uint32_t test_id);
 
+    // Move only.
     Random(const Random &) = delete;
     void operator=(const Random &) = delete;
+    Random(Random &&) = default;
+    Random &operator=(Random &&) = default;
 
+    // Standard library API.
     using result_type = uint32_t;
-
     static constexpr uint32_t min() { return 0; }
     static constexpr uint32_t max() { return 0xffffffff; }
-
     uint32_t operator()();
 
+    // Helper: uniformly random integer in [min, max] inclusive.
     template <typename T>
-    T uniform(const T min, const T max) {
-        std::uniform_int_distribution<T> dist{min, max};
-        return dist(*this);
-    }
+    T uniform_int(T min, T max);
 
 private:
     uint64_t nonce;
@@ -99,10 +99,10 @@ array<uint32_t, 16> chacha(
     input[2] = 0x79622d32; // "2-by"
     input[3] = 0x6b206574; // "te k'
     std::copy(key.begin(), key.end(), input.begin() + 4);
-    input[12] = uint32_t(counter);
-    input[13] = uint32_t(counter >> 32);
-    input[14] = uint32_t(nonce);
-    input[15] = uint32_t(nonce >> 32);
+    input[12] = static_cast<uint32_t>(counter);
+    input[13] = static_cast<uint32_t>(counter >> 32);
+    input[14] = static_cast<uint32_t>(nonce);
+    input[15] = static_cast<uint32_t>(nonce >> 32);
 
     array<uint32_t, 16> x = input;
 
@@ -126,15 +126,19 @@ array<uint32_t, 16> chacha(
 }
 
 Random::Random(
-        const std::string &problem_name,
+        const std::string_view problem_name,
         const uint32_t test_id)
 {
-    assert(problem_name.size() <= 4);
+    if (problem_name.size() > 4) {
+        throw std::invalid_argument("problem_name too long");
+    }
     nonce = test_id;
     for (size_t i=0; i != problem_name.size(); ++i) {
-        const uint8_t byte = problem_name[i];
-        assert(byte != 0);
-        nonce |= uint64_t(byte) << (4 + i);
+        const uint8_t byte = static_cast<uint8_t>(problem_name[i]);
+        if (byte == 0) {
+            throw std::invalid_argument("0 bytes in problem_name");
+        }
+        nonce |= static_cast<uint64_t>(byte) << (4 + i);
     }
 }
 
@@ -143,11 +147,17 @@ uint32_t Random::operator()() {
         buffer = chacha<20>(key, nonce, counter);
         buffer_next = 0;
         ++counter;
-        assert(counter != 0);
+        if (counter == 0) {
+            throw std::runtime_error("Random counter overflow");
+        }
     }
-    const uint32_t res = buffer[buffer_next];
-    ++buffer_next;
-    return res;
+    return buffer[buffer_next++];
+}
+
+template <typename T>
+T Random::uniform_int(const T min, const T max) {
+    std::uniform_int_distribution<T> dist{min, max};
+    return dist(*this);
 }
 
 } // namespace random
