@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -21,7 +22,11 @@ public:
         strict,
     };
 
-    // Create a Reader.
+    // Read from an existing stream.
+    explicit Reader(std::istream &input,
+                    Strictness strictness = Strictness::strict);
+ 
+    // Open a file.
     explicit Reader(std::string_view file_name,
                     Strictness strictness = Strictness::strict);
 
@@ -105,7 +110,8 @@ private:
     void advance_char();
     void skip_whitespace_in_line(bool required = false);
 
-    std::ifstream m_input;
+    std::unique_ptr<std::ifstream> m_file;
+    std::istream &m_input;
     Strictness m_strictness;
 
     bool m_eof = false;
@@ -115,11 +121,19 @@ private:
     unsigned long long m_column = 0;
 };
 
-inline Reader::Reader(const std::string_view file_name, const Strictness strictness):
-    m_input(std::string(file_name)),
-    m_strictness(strictness)
+inline Reader::Reader(std::istream &input, Strictness strictness):
+    m_input{input},
+    m_strictness{strictness}
 {
-    if (m_input.fail()) {
+    advance_char();
+}
+
+inline Reader::Reader(const std::string_view file_name, const Strictness strictness):
+    m_file{std::make_unique<std::ifstream>(std::string(file_name))},
+    m_input{*m_file},
+    m_strictness{strictness}
+{
+    if (m_file->fail()) {
         error(std::string("can't open file ") + std::string(file_name));
     }
     advance_char();
