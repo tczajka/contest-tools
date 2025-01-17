@@ -37,10 +37,6 @@ public:
     // Prints error to stdout and exits the process with exit code 1.
     void error(std::string_view error) const;
 
-    // Verifies end of file reached.
-    // In permissive mode allows extra whitespace, including empty lines.
-    bool is_eof() const { return m_eof; }
-
     // Look at the next character but do not consume it.
     char peek() const;
 
@@ -57,6 +53,7 @@ public:
     void read_eoln();
 
     // Verify we have reached end of file.
+    // In permissive mode skips any remaining whitespace.
     void read_eof();
 
     // Endline-terminated string.
