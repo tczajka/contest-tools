@@ -76,7 +76,7 @@ public:
     T read_int(T min, T max);
 
     // Works for float, double, long double.
-    // Format: [0-9]+(.[0-9]*).
+    // In permissive mode scientific notation allowed.
     // In permissive mode skips leading whitespace (but not eoln).
     // In strict mode leading zeros and "-0" not allowed.
     template <typename T>
@@ -197,8 +197,7 @@ inline void Reader::read_eof() {
 inline std::string Reader::read_line() {
     std::string res;
     while (!m_eof && m_next_char != '\n') {
-        res += m_next_char;
-        advance_char();
+        res += read_char();
     }
     if (m_eof) {
         if (m_strictness == Strictness::strict) {
@@ -216,8 +215,7 @@ inline std::string Reader::read_string() {
     }
     std::string res;
     while (!m_eof && !std::isspace(m_next_char)) {
-        res += m_next_char;
-        advance_char();
+        res += read_char();
     }
     if (res.empty()) {
         error("Expected string");
@@ -231,14 +229,9 @@ inline T Reader::read_int(const T min, const T max) {
         skip_whitespace_in_line();
     }
     std::string s;
-    if (m_next_char == '-') {
-        s += m_next_char;
-        advance_char();
-    }
-    while (std::isdigit(m_next_char)) {
-        s += m_next_char;
-        advance_char();
-    }
+    if (m_next_char == '-') s += read_char();
+    while (std::isdigit(m_next_char)) s += read_char();
+
     if (m_strictness == Strictness::strict) {
         if ((s.size() >= 2 && s[0] == '0') ||
             (s.size() >= 3 && s[0] == '-' && s[1] == '0')) {
@@ -269,27 +262,26 @@ inline T Reader::read_real(
         skip_whitespace_in_line();
     }
     std::string s;
-    if (m_next_char == '-') {
-        s += m_next_char;
-        advance_char();
-    }
-    while (std::isdigit(m_next_char)) {
-        s += m_next_char;
-        advance_char();
-    }
+    if (m_next_char == '-') s += read_char();
+    while (std::isdigit(m_next_char)) s += read_char();
     if (m_next_char == '.') {
-        s += m_next_char;
-        advance_char();
+        s += read_char();
         std::size_t fractional_digits = 0;
         while (std::isdigit(m_next_char)) {
-            s += m_next_char;
+            s += read_char();
             ++fractional_digits;
-            advance_char();
         }
         if (fractional_digits > max_fractional_digits) {
             error(std::string("More than ") + std::to_string(max_fractional_digits) +
                     " fractional_digits");
         }
+    }
+    if (m_strictness == Strictness::permissive && m_next_char == 'e') {
+        s += read_char();
+        if (m_next_char == '+' || m_next_char == '-') {
+            s += read_char();
+        }
+        while (std::isdigit(m_next_char)) s += read_char();
     }
     if (m_strictness == Strictness::strict) {
         if ((s.size() >= 2 && s[0] == '0' && s[1] != '.') ||
@@ -299,8 +291,12 @@ inline T Reader::read_real(
     }
     const char *const begin = s.data();
     const char *const end = s.data() + s.size();
+    const auto fmt = m_strictness == Strictness::strict ?
+        std::chars_format::fixed :
+        std::chars_format::general;
+
     T res;
-    const auto code = std::from_chars(begin, end, res, std::chars_format::fixed);
+    const auto code = std::from_chars(begin, end, res, fmt);
     if (code.ec != std::errc{} || code.ptr != end || res < min || res > max) {
         error(std::string("Expected real in range [")
                 + std::to_string(min) + ", "
