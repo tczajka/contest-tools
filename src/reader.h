@@ -22,13 +22,32 @@ public:
         strict,
     };
 
+    // How to handle errors.
+    enum class ErrorHandling {
+        // Print an error and exit.
+        exit,
+        // Throw an exception.
+        exception,
+    };
+
+    // Parse error.
+    struct Error {
+        unsigned long long line;
+        unsigned long long column;
+        std::string error;
+    };
+
     // Read from an existing stream.
-    explicit Reader(std::istream &input,
-                    Strictness strictness = Strictness::strict);
+    explicit Reader(
+            std::istream &input,
+            Strictness strictness = Strictness::strict,
+            ErrorHandling error_handling = ErrorHandling::exit);
  
     // Open a file.
-    explicit Reader(std::string_view file_name,
-                    Strictness strictness = Strictness::strict);
+    explicit Reader(
+            std::string_view file_name,
+            Strictness strictness = Strictness::strict,
+            ErrorHandling error_handling = ErrorHandling::exit);
 
     // Reader can't be copied.
     Reader(const Reader &) = delete;
@@ -40,10 +59,10 @@ public:
     ~Reader();
 
     // Prints error to stdout and exits the process with exit code 1.
-    void error(std::string_view error) const;
+    void error(std::string_view error);
 
     // Look at the next character but do not consume it.
-    char peek() const;
+    char peek();
 
     // Read a character, including whitespace.
     char read_char();
@@ -113,6 +132,7 @@ private:
     std::unique_ptr<std::ifstream> m_file;
     std::istream &m_input;
     Strictness m_strictness;
+    ErrorHandling m_error_handling;
 
     bool m_eof = false;
     char m_next_char = 0;
@@ -121,17 +141,25 @@ private:
     unsigned long long m_column = 0;
 };
 
-inline Reader::Reader(std::istream &input, Strictness strictness):
+inline Reader::Reader(
+        std::istream &input,
+        const Strictness strictness,
+        const ErrorHandling error_handling):
     m_input{input},
-    m_strictness{strictness}
+    m_strictness{strictness},
+    m_error_handling{error_handling}
 {
     advance_char();
 }
 
-inline Reader::Reader(const std::string_view file_name, const Strictness strictness):
+inline Reader::Reader(
+        const std::string_view file_name,
+        const Strictness strictness,
+        const ErrorHandling error_handling):
     m_file{std::make_unique<std::ifstream>(std::string(file_name))},
     m_input{*m_file},
-    m_strictness{strictness}
+    m_strictness{strictness},
+    m_error_handling{error_handling}
 {
     if (m_file->fail()) {
         error(std::string("can't open file ") + std::string(file_name));
@@ -143,12 +171,18 @@ inline Reader::~Reader() {
     read_eof();
 }
 
-inline void Reader::error(const std::string_view error) const {
-    std::cout << "ERROR(" << m_line << ":" << m_column << "): " << error << "\n";
-    std::exit(1);
+inline void Reader::error(const std::string_view error) {
+    if (m_error_handling == ErrorHandling::exception) {
+        m_next_char = 0;
+        m_eof = true;
+        throw Error{m_line, m_column, std::string(error)};
+    } else {
+        std::cout << "ERROR(" << m_line << ":" << m_column << "): " << error << "\n";
+        std::exit(1);
+    }
 }
 
-inline char Reader::peek() const {
+inline char Reader::peek() {
     if (m_eof) {
         error("Unexpected EOF");
     }
@@ -276,7 +310,10 @@ inline T Reader::read_real(
                     " fractional_digits");
         }
     }
-    if (m_strictness == Strictness::permissive && (m_next_char == 'e' || m_next_char == 'E')) {
+    if (m_next_char == 'e' || m_next_char == 'E') {
+        if (m_strictness == Strictness::strict) {
+            error("scientific notation");
+        }
         s += read_char();
         if (m_next_char == '+' || m_next_char == '-') {
             s += read_char();
