@@ -276,7 +276,7 @@ inline T Reader::read_real(
                     " fractional_digits");
         }
     }
-    if (m_strictness == Strictness::permissive && m_next_char == 'e') {
+    if (m_strictness == Strictness::permissive && (m_next_char == 'e' || m_next_char == 'E')) {
         s += read_char();
         if (m_next_char == '+' || m_next_char == '-') {
             s += read_char();
