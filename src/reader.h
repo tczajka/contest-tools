@@ -3,6 +3,7 @@
 
 #include <cctype>
 #include <charconv>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -339,7 +340,7 @@ inline T Reader::read_real(
                 + std::to_string(min) + ", "
                 + std::to_string(max) + "]");
     }
-    if (m_strictness == Strictness::strict && res == 0.0 && s.size() >= 1 && s[0] == '-') {
+    if (m_strictness == Strictness::strict && std::fabs(res) <= 0.0 && s.size() >= 1 && s[0] == '-') {
         error("Negative 0");
     }
     return res;
