@@ -47,7 +47,7 @@ void test_shuffle() {
   Random random("foo", 123);
   const std::array<int, 3> v = {1,2,3};
   std::array<int, 3> w = v;
-  std::shuffle(w.begin(), w.end(), random);
+  random.shuffle(w.begin(), w.end());
   std::sort(w.begin(), w.end());
   assert(w == v);
 }

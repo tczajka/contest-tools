@@ -8,12 +8,14 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace random_private {
 
-using std::array, std::uint8_t, std::uint32_t, std::uint64_t;
+using std::array, std::uint8_t, std::uint32_t, std::uint64_t, std::int64_t;
 
 // Cryptographic key.
 //
@@ -27,7 +29,6 @@ constexpr array<uint32_t, 8> key = {
 };
 
 // A random generator.
-// Can be used by C++ standard library functions.
 class Random {
 public:
     // Random stream is determined by (key, problem_name, test_id).
@@ -42,21 +43,27 @@ public:
     Random(Random &&) = default;
     Random &operator=(Random &&) = default;
 
-    // Standard library API.
-    using result_type = uint32_t;
-    static constexpr uint32_t min() { return 0; }
-    static constexpr uint32_t max() { return 0xffffffff; }
-    uint32_t operator()();
+    uint64_t bits(int n);
 
-    // Helper: uniformly random integer in [min, max] inclusive.
-    template <typename T>
-    T uniform_int(T min, T max);
+    int uniform_int(int min, int max);
+    unsigned uniform_uint(unsigned min, unsigned max);
+    int64_t uniform_int64(int64_t min, int64_t max);
+    uint64_t uniform_uint64(uint64_t min, uint64_t max);
+
+    template <typename Iter>
+    void shuffle(Iter begin, Iter end);
 
 private:
-    uint64_t nonce;
-    uint64_t counter = 0;
-    array<uint32_t, 16> buffer = {};
-    int buffer_next = 16;
+    uint64_t m_nonce;
+    uint64_t m_counter = 0;
+    array<uint32_t, 16> m_word_buffer = {};
+    int m_word_buffer_next = 16;
+
+    uint32_t m_bits_buffer = 0;
+    int m_num_bits = 0;
+
+    uint64_t m_number_buffer = 0;
+    uint64_t m_number_range = 1;
 };
 
 template <int bits>
@@ -125,39 +132,109 @@ array<uint32_t, 16> chacha(
     return x;
 }
 
-Random::Random(
+inline Random::Random(
         const std::string_view problem_name,
         const uint32_t test_id)
 {
     if (problem_name.size() > 4) {
         throw std::invalid_argument("problem_name too long");
     }
-    nonce = test_id;
+    m_nonce = test_id;
     for (size_t i=0; i != problem_name.size(); ++i) {
         const uint8_t byte = static_cast<uint8_t>(problem_name[i]);
         if (byte == 0) {
             throw std::invalid_argument("0 bytes in problem_name");
         }
-        nonce |= static_cast<uint64_t>(byte) << (4 + i);
+        m_nonce |= static_cast<uint64_t>(byte) << (4 + i);
     }
 }
 
-uint32_t Random::operator()() {
-    if (buffer_next == 16) {
-        buffer = chacha<20>(key, nonce, counter);
-        buffer_next = 0;
-        ++counter;
-        if (counter == 0) {
-            throw std::runtime_error("Random counter overflow");
+inline uint64_t Random::bits(int n) {
+    if (n > 64) {
+        throw std::invalid_argument("n > 64");
+    }
+    uint64_t result = 0;
+    while (n >= m_num_bits) {
+        result <<= m_num_bits;
+        result |= m_bits_buffer;
+        n -= m_num_bits;
+
+        // refill bits
+        if (m_word_buffer_next == 16) {
+            // refill words
+            m_word_buffer = chacha<20>(key, m_nonce, m_counter++);
+            m_word_buffer_next = 0;
+            if (m_counter == 0) {
+                throw std::runtime_error("Random counter overflow");
+            }
+            m_word_buffer_next = 0;
+        }
+        m_bits_buffer = m_word_buffer[m_word_buffer_next++];
+        m_num_bits = 32;
+    }
+    // n < m_num_bits <= 32
+    result <<= n;
+    result |= m_bits_buffer & ((1u << n) - 1u);
+    m_bits_buffer >>= n;
+    m_num_bits -= n;
+    return result;
+}
+
+inline int Random::uniform_int(const int min, const int max) {
+    return static_cast<int>(uniform_int64(min, max));
+}
+
+inline unsigned Random::uniform_uint(const unsigned min, const unsigned max) {
+    return static_cast<unsigned>(uniform_uint64(min, max));
+}
+
+inline int64_t Random::uniform_int64(const int64_t min, const int64_t max) {
+    if (min > max) {
+        throw std::invalid_argument("min > max");
+    }
+    const uint64_t umin = static_cast<uint64_t>(min);
+    const uint64_t umax = static_cast<uint64_t>(max);
+    return static_cast<int64_t>(uniform_uint64(0, umax - umin) + umin);
+}
+
+inline uint64_t Random::uniform_uint64(const uint64_t min, const uint64_t max) {
+    if (min > max) {
+        throw std::invalid_argument("min > max");
+    }
+    if (min == 0u && max == std::numeric_limits<uint64_t>::max()) {
+        return bits(64);
+    }
+    const uint64_t n = max - min + 1u;
+
+    for (;;) {
+        // refill number buffer
+        const int zeros = __builtin_clzll(m_number_range);
+        m_number_range <<= zeros;
+        m_number_buffer <<= zeros;
+        m_number_buffer |= bits(zeros);
+
+        const uint64_t num_groups = m_number_range / n;
+        const uint64_t small_group = m_number_range % n;
+        const uint64_t group = m_number_buffer / n;
+        const uint64_t in_group = m_number_buffer % n;
+        if (group < num_groups) {
+            m_number_range = num_groups;
+            m_number_buffer = group;
+            return min + in_group;
+        } else {
+            m_number_range = small_group;
+            m_number_buffer = in_group;
         }
     }
-    return buffer[buffer_next++];
 }
 
-template <typename T>
-T Random::uniform_int(const T min, const T max) {
-    std::uniform_int_distribution<T> dist{min, max};
-    return dist(*this);
+template <typename Iter>
+void Random::shuffle(Iter begin, Iter end) {
+    const uint64_t n = end - begin;
+    for (uint64_t i=1; i < n; ++i) {
+        const uint64_t j = uniform_uint64(0, i);
+        std::swap(*(begin+i), *(begin+j));
+    }
 }
 
 } // namespace random
